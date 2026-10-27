@@ -120,6 +120,7 @@
     <button class="btn" id="test" type="button" style="margin-top:12px">Test connection</button>
     <div class="testres" id="testres"></div>
     <label class="remember"><input type="checkbox" id="remember"> Remember this setup (incl. key) on this device</label>
+    <label class="remember"><input type="checkbox" id="rememberChat"> Save chat history on this device (survives refresh)</label>
   </div>
 
   <div class="statusbar">
@@ -243,21 +244,22 @@ function friendlyError(e, c){
 const chatEl = el('chat');
 function scrollDown(){ chatEl.scrollTop = chatEl.scrollHeight; }
 function pushMsg(who, text){
-  state.transcript.push({ who, text });
+  state.transcript.push({ who, text, name: who === 'ai' ? getCfg().name : 'You' });
   renderMsg(who, text);
   setCounter();
+  saveChat();
 }
-function renderMsg(who, text){
+function renderMsg(who, text, savedName){
   const empty = el('emptyNote'); if (empty) empty.remove();
   const c = getCfg();
   const row = document.createElement('div');
   row.className = 'msg ' + who;
   const av = document.createElement('div');
   av.className = 'avatar';
-  av.textContent = who === 'ai' ? c.name.slice(0,1).toUpperCase() : 'You'.slice(0,1);
+  av.textContent = who === 'ai' ? (savedName || c.name).slice(0,1).toUpperCase() : 'You'.slice(0,1);
   const wrap = document.createElement('div'); wrap.className = 'bubblewrap';
   const nm = document.createElement('div'); nm.className = 'name';
-  nm.textContent = who === 'ai' ? c.name : 'You';
+  nm.textContent = who === 'ai' ? (savedName || c.name) : 'You';
   const bb = document.createElement('div'); bb.className = 'bubble'; bb.textContent = text;
   wrap.appendChild(nm); wrap.appendChild(bb);
   row.appendChild(av); row.appendChild(wrap);
@@ -333,13 +335,14 @@ el('stopBtn').addEventListener('click', () => {
 el('clearBtn').addEventListener('click', () => {
   if (state.busy) return;
   state.transcript = [];
+  localStorage.removeItem('ai-chat-history');
   chatEl.innerHTML = '<div class="empty" id="emptyNote">Your conversation will appear here.<br>Say hi below. 👋</div>';
   setCounter(); setStatus('Cleared.');
 });
 el('dlBtn').addEventListener('click', () => {
   if (!state.transcript.length){ sysBubble('Nothing to download yet.', true); return; }
   const c = getCfg();
-  const lines = state.transcript.map(t => (t.who === 'ai' ? c.name : 'You') + ': ' + t.text);
+  const lines = state.transcript.map(t => (t.name || (t.who === 'ai' ? c.name : 'You')) + ': ' + t.text);
   const blob = new Blob([lines.join('\n\n')], { type:'text/plain' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -376,6 +379,29 @@ el('test').addEventListener('click', async () => {
   }
 });
 
+/* ---------- chat persistence ---------- */
+// Same idea as the setup box: only saved while the box is ticked, only on this
+// device, only in this browser. The AI's memory IS the transcript (history() is
+// built from state.transcript), so restoring the saved transcript restores what
+// the AI remembers — nothing separate to sync.
+function saveChat(){
+  if (!el('rememberChat').checked){ localStorage.removeItem('ai-chat-history'); return; }
+  try { localStorage.setItem('ai-chat-history', JSON.stringify(state.transcript)); } catch(e){}
+}
+function loadChat(){
+  try {
+    const data = JSON.parse(localStorage.getItem('ai-chat-history') || 'null');
+    if (!Array.isArray(data) || !data.length) return;
+    const valid = data.filter(t => t && (t.who === 'ai' || t.who === 'user') && typeof t.text === 'string');
+    if (!valid.length) return;
+    el('rememberChat').checked = true;
+    state.transcript = valid;
+    for (const t of valid) renderMsg(t.who, t.text, t.name);
+    setCounter();
+    setStatus('Chat restored from this device — the AI will remember it too.');
+  } catch(e){}
+}
+
 /* ---------- remember settings ---------- */
 const FIELDS = ['name','prov','key','base','model','sys'];
 function saveSettings(){
@@ -396,7 +422,9 @@ function loadSettings(){
 }
 for (const f of FIELDS) el(f).addEventListener('change', saveSettings);
 el('remember').addEventListener('change', saveSettings);
+el('rememberChat').addEventListener('change', saveChat);
 loadSettings();
+loadChat();
 </script>
 </body>
 </html>

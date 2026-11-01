@@ -50,6 +50,10 @@
   .msg{display:flex;gap:10px;max-width:100%}
   .msg.user{align-self:flex-end;flex-direction:row-reverse}
   .msg.ai{align-self:flex-start}
+  .delbtn{align-self:flex-start;background:transparent;border:none;color:var(--muted);
+  opacity:.35;font-size:18px;line-height:1;cursor:pointer;padding:6px 2px}
+  .delbtn:hover{opacity:1;color:var(--red)}
+
   .avatar{width:34px;height:34px;border-radius:50%;flex:0 0 34px;display:flex;align-items:center;
     justify-content:center;font-weight:700;font-size:13px;color:#fff}
   .ai .avatar{background:var(--blue)} .user .avatar{background:#4b5563}
@@ -266,7 +270,12 @@ function renderMsg(who, text, savedName){
   const bb = document.createElement('div'); bb.className = 'bubble'; bb.textContent = text;
   wrap.appendChild(nm); wrap.appendChild(bb);
   row.appendChild(av); row.appendChild(wrap);
-  chatEl.appendChild(row); scrollDown();
+const del = document.createElement('button');
+del.className = 'delbtn'; del.type = 'button'; del.title = 'Delete this message';
+del.textContent = '×';
+row.appendChild(del);
+chatEl.appendChild(row); scrollDown();
+
 }
 function sysBubble(text, isErr){
   const empty = el('emptyNote'); if (empty) empty.remove();
@@ -274,6 +283,23 @@ function sysBubble(text, isErr){
   d.className = 'sysmsg' + (isErr ? ' err' : ''); d.textContent = text;
   chatEl.appendChild(d); scrollDown();
 }
+  chatEl.addEventListener('click', e => {
+  const btn = e.target.closest('.delbtn');
+  if (!btn) return;
+  const row = btn.closest('.msg');
+  if (!row) return;
+  const idx = Array.from(chatEl.querySelectorAll('.msg')).indexOf(row);
+  if (idx < 0 || idx >= state.transcript.length) return;
+  if (!confirm('Delete this message? It will also stop being sent to the AI.')) return;
+  state.transcript.splice(idx, 1);
+  row.remove();
+  setCounter();
+  saveChat();
+  if (!state.transcript.length){
+    chatEl.innerHTML = '<div class="empty" id="emptyNote">Your conversation will appear here.<br>Say hi below. 👋</div>';
+  }
+});
+
 let typingEl = null;
 function showTyping(){
   hideTyping();

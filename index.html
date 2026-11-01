@@ -220,7 +220,10 @@ async function callProvider(systemText, msgs){
   if (!res.ok) throw new Error('Gemini ' + res.status + ': ' + (await res.text()).slice(0,300));
   const d = await res.json();
   const cand = d.candidates && d.candidates[0];
-  return ((cand && cand.content && cand.content.parts) || []).map(p => p.text || '').join('').trim();
+  const text = ((cand && cand.content && cand.content.parts) || []).map(p => p.text || '').join('').trim();
+  if (text) return text;
+  const reason = (cand && cand.finishReason) || (d.promptFeedback && d.promptFeedback.blockReason) || 'unknown';
+  return '__EMPTY__:' + reason;
 }
 
 /* ---------- error diagnosis ---------- */
@@ -320,6 +323,7 @@ async function send(){
   hideTyping(); setBusy(false);
   if (state.stopped){ setStatus('Stopped by you.'); return; }
   if (!reply){ sysBubble('(The AI returned an empty reply.)', true); setStatus('Idle.'); return; }
+  if (reply.indexOf('__EMPTY__:') === 0){ sysBubble('(The AI returned no text — reason: ' + reply.slice(10) + ')', true); setStatus('Idle.'); return; }
   pushMsg('ai', reply);
   setStatus('Idle.');
 }

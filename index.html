@@ -242,10 +242,20 @@ function friendlyError(e, c){
     if (c && c.prov === 'openai' && /^https?:\/\/(localhost|127\.)/i.test(c.base || '')){
       return 'Network error: the base URL points at this device (localhost) — is LM Studio / Ollama actually running on it?';
     }
-    return 'Network error: the request never reached the provider. If you opened this page inside the Muse chat preview, download the file and open it directly in your browser instead — previews block these requests. Otherwise check your internet connection.';
+        return 'Network error: the request never reached the provider. If you opened this page inside the Muse chat preview, download the file and open it directly in your browser instead — previews block these requests. Otherwise check your internet connection.';
+  }
+  // 429 = free-API rate limit (too many requests / too many tokens per minute);
+  // 503 = the model is overloaded ("high demand"). Neither means your key or
+  // the page is broken — both mean "try again in a bit".
+  if (/429|resource.exhausted|quota|rate.limit/i.test(m)){
+    return 'Rate limit (429): the free API only allows so many requests per minute — and this long chat sends the whole history every time, so it hits the limit fast. The page already retried 3 times; wait a minute and send again.';
+  }
+  if (/503|overloaded/i.test(m)){
+    return 'Gemini is overloaded right now (503) — too much demand on that model. Nothing wrong with your key or the page; the page already retried 3 times. Wait a bit and send again.';
   }
   return m;
 }
+
 
 /* ---------- rendering ---------- */
 const chatEl = el('chat');
@@ -338,14 +348,37 @@ async function send(){
   state.stopped = false;
   showTyping();
   let reply = '';
+// Auto-retry on rate-limit / overload (429 / 503): the free API trips these
+// often, and a short wait usually clears it. Waits 5s, then 15s, then 30s.
+// Any other error fails at once, exactly as before. Stop still works while
+// waiting — the wait is checked once a second and aborts if you hit Stop.
+let lastErr = null;
+for (let attempt = 0; attempt <= 3; attempt++){
   try {
     reply = await callProvider(c.sys, history());
+    lastErr = null;
+    break;
   } catch(e){
-    hideTyping(); setBusy(false);
-    sysBubble('⚠ Error: ' + friendlyError(e, c), true);
-    setStatus('Stopped on an error.');
-    return;
+    lastErr = e;
+    const m = String((e && e.message) || e);
+    const retryable = /429|503|overloaded|resource.exhausted|rate.limit|quota/i.test(m);
+    if (!retryable || attempt === 3) break;
+    const wait = [5, 15, 30][attempt];
+    setStatus('Busy — retrying in ' + wait + 's… (attempt ' + (attempt + 1) + ' of 3)');
+    for (let s = 0; s < wait; s++){
+      await new Promise(r => setTimeout(r, 1000));
+      if (state.stopped) break;
+    }
+    if (state.stopped) break;
   }
+}
+if (lastErr){
+  hideTyping(); setBusy(false);
+  sysBubble('⚠ Error: ' + friendlyError(lastErr, c), true);
+  setStatus('Stopped on an error.');
+  return;
+}
+
   hideTyping(); setBusy(false);
   if (state.stopped){ setStatus('Stopped by you.'); return; }
   if (!reply){ sysBubble('(The AI returned an empty reply.)', true); setStatus('Idle.'); return; }
